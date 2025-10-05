@@ -14,17 +14,16 @@ Glättung, adaptive Schwellenwertbildung, morphologische Reinigung,
 Kantenerkennung und Formanalyse anhand des Beispiels 'coins'.
 """
 
-from skimage import data, filters, feature
+from skimage import data
+from skimage.filters import threshold_local
+from skimage.feature import canny
 import cv2
-import matplotlib.pyplot as plt
 import numpy as np
-import os
 from typing import Dict, Any, Tuple
 
 
 def detect_objects(
     img: np.ndarray = None,
-    debug_dir: str = "debug_output",
     block_size: int = 51,
     morph_kernel: Tuple[int, int] = (5, 5),
     circ_min: float = 0.80,
@@ -44,8 +43,6 @@ def detect_objects(
       - img_boxes: final annotated image (BGR)
       - contours_info: list of per-contour metrics
     """
-    os.makedirs(debug_dir, exist_ok=True)
-
     # Load sample image if none provided
     if img is None:
         img = data.coins()
@@ -58,7 +55,7 @@ def detect_objects(
     result["blur"] = blur
 
     # 2. Local adaptive threshold
-    local_thresh = filters.threshold_local(blur, block_size, method="mean")
+    local_thresh = threshold_local(blur, block_size, method="mean")
     mask = blur > local_thresh
     result["local_thresh"] = local_thresh
     result["mask"] = mask
@@ -69,10 +66,9 @@ def detect_objects(
     mask_open = cv2.morphologyEx(mask_u8, cv2.MORPH_OPEN, kernel)
     mask_clean = cv2.morphologyEx(mask_open, cv2.MORPH_CLOSE, kernel)
     result["mask_clean"] = mask_clean
-    plt.imsave(os.path.join(debug_dir, "04_mask_clean.png"), mask_clean, cmap="gray")
 
     # 4. Edges
-    edges = feature.canny(mask_clean > 0, sigma=1.0)
+    edges = canny(mask_clean > 0, sigma=1.0)
     result["edges"] = edges
 
     # 5. Contours and filtering
@@ -128,13 +124,11 @@ def detect_objects(
         cv2.putText(img_boxes, str(idx), (x + 2, y + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 
     result["img_boxes"] = img_boxes
-    # Save final annotated image for convenience
-    plt.imsave(os.path.join(debug_dir, "07_contours_boxes.png"), cv2.cvtColor(img_boxes, cv2.COLOR_BGR2RGB))
 
     return result
 
 
 if __name__ == "__main__":
     # Minimal demo: run pipeline and save results 
-    res = detect_objects()
+    res = detect_objects(save_outputs=True)
     print(f"Detected {len(res.get('img_boxes', []))} pixels in final image (see debug_output)")
