@@ -39,7 +39,7 @@ plt.figure(figsize=(6, 4))
 plt.imshow(blur, cmap='gray')
 plt.title('Gaussian blur')
 plt.axis('off')
-plt.savefig(os.path.join('debug_output', '02_blur.png'), bbox_inches='tight')
+# blur image not saved as debug output to keep only real results
 plt.close()
 
 # ------------------------------------------------
@@ -56,7 +56,7 @@ thresh_val = None
 plt.figure(figsize=(6, 4))
 plt.imshow(mask, cmap='gray')
 plt.axis('off')
-plt.savefig(os.path.join('debug_output', '03_mask.png'), bbox_inches='tight')
+# raw adaptive mask not saved as debug output (keeping only cleaned mask)
 plt.close()
 
 # ------------------------------------------------
@@ -83,8 +83,7 @@ plt.figure(figsize=(6, 4))
 plt.imshow(edges, cmap='gray')
 plt.title('Canny edge detection')
 plt.axis('off')
-# save edges
-plt.savefig(os.path.join('debug_output', '05_edges.png'), bbox_inches='tight')
+# edges not saved to debug output
 plt.close()
 
 # ------------------------------------------------
@@ -93,15 +92,61 @@ plt.close()
 contours, _ = cv2.findContours(
     mask_clean, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
 )
-# filter contours by area
-filtered_contours = [c for c in contours if cv2.contourArea(c) > 800]
+# compute automatic min-area heuristic from contour areas
+areas = [cv2.contourArea(c) for c in contours]
+if len(areas) > 0:
+    median_area = float(np.median(areas))
+    min_area = max(200, int(median_area * 0.5))
+else:
+    min_area = 800
+
+# filter contours by automatic min_area
+filtered_contours = [c for c in contours if cv2.contourArea(c) > min_area]
 img_contours = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
 cv2.drawContours(img_contours, filtered_contours, -1, (0, 255, 0), 1)
 
+# ------------------------------------------------
+# Compute shape metrics and filter by circularity/solidity/fit_ratio
+# Defaults: circularity>0.80, solidity>0.85, fit_ratio>0.80
+circ_min = 0.80
+solidity_min = 0.85
+fit_ratio_min = 0.80
+
+accepted_contours = []
+metrics = []
+for c in filtered_contours:
+    area = cv2.contourArea(c)
+    perimeter = cv2.arcLength(c, True)
+    circularity = 0.0
+    if perimeter > 0:
+        circularity = 4 * np.pi * area / (perimeter ** 2)
+
+    # solidity via convex hull
+    hull = cv2.convexHull(c)
+    hull_area = cv2.contourArea(hull)
+    solidity = area / hull_area if hull_area > 0 else 0
+
+    # min enclosing circle fit ratio
+    (cx, cy), radius = cv2.minEnclosingCircle(c)
+    fit_area = np.pi * (radius ** 2)
+    fit_ratio = area / fit_area if fit_area > 0 else 0
+
+    metrics.append({'area': area, 'circularity': circularity, 'solidity': solidity, 'fit_ratio': fit_ratio})
+
+    if circularity >= circ_min and solidity >= solidity_min and fit_ratio >= fit_ratio_min:
+        accepted_contours.append(c)
+
+# Draw bounding boxes and numeric labels for each accepted contour
+img_boxes = img_contours.copy()
+for idx, c in enumerate(accepted_contours, start=1):
+    x, y, w, h = cv2.boundingRect(c)
+    cv2.rectangle(img_boxes, (x, y), (x + w, y + h), (255, 0, 0), 1)
+    cv2.putText(img_boxes, str(idx), (x + 2, y + 12), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (255, 255, 255), 1)
 plt.figure(figsize=(6, 4))
-plt.imshow(cv2.cvtColor(img_contours, cv2.COLOR_BGR2RGB))
-plt.title(f'Filtered contours: {len(filtered_contours)}')
+plt.imshow(cv2.cvtColor(img_boxes, cv2.COLOR_BGR2RGB))
+plt.title(f'Accepted contours: {len(accepted_contours)} (min_area={min_area})')
 plt.axis('off')
-plt.savefig(os.path.join('debug_output', '07_contours.png'), bbox_inches='tight')
-plt.show()
+plt.savefig(os.path.join('debug_output', '07_contours_boxes.png'), bbox_inches='tight')
 plt.close()
+
+# Optionally, if you want the rejected ones too, you can inspect metrics list
